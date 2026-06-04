@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState, useCallback } from "react";
-import { ActivityIndicator, ScrollView, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, View, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -122,6 +122,251 @@ function StatusTimeline({ currentStatus }: { currentStatus: string }) {
         );
       })}
     </View>
+  );
+}
+
+type EvidenceItem = {
+  id: string;
+  evidence_type: string;
+  user_role: string;
+  notes: string | null;
+  created_at: string;
+  signed_url: string | null;
+  can_delete: boolean;
+};
+
+const EVIDENCE_TYPE_LABELS: Record<string, string> = {
+  item_photo: "Item Photo",
+  pre_delivery: "Pre-Delivery",
+  received_item: "Received Item",
+  dispute_evidence: "Dispute Evidence",
+};
+
+function WebEvidenceSection({
+  inviteId,
+  inviteToken,
+  status,
+}: {
+  inviteId: string;
+  inviteToken: string;
+  status: string;
+}) {
+  const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [viewImage, setViewImage] = useState<EvidenceItem | null>(null);
+
+  const canUpload = ["accepted", "funded", "in_delivery", "disputed", "admin_review"].includes(status);
+
+  const fetchEvidence = useCallback(async () => {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invite_id: inviteId, token: inviteToken, action: "get_evidence" }),
+      });
+      const data = await response.json();
+      if (response.ok && data.evidence) {
+        setEvidence(data.evidence);
+      }
+    } catch {
+      // Silently fail
+    }
+  }, [inviteId, inviteToken]);
+
+  useEffect(() => {
+    fetchEvidence();
+  }, [fetchEvidence]);
+
+  const handleUpload = async () => {
+    if (Platform.OS === "web") {
+      // Web: use hidden file input
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.onchange = async (e: any) => {
+        const file = e.target?.files?.[0];
+        if (!file) return;
+
+        setUploading(true);
+        try {
+          // Read file as base64
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => {
+              const result = reader.result as string;
+              // Strip the data:image/...;base64, prefix
+              resolve(result.split(",")[1]);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              invite_id: inviteId,
+              token: inviteToken,
+              action: "upload_evidence",
+              image_base64: base64,
+              evidence_type: "pre_delivery",
+            }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            Alert.alert("Upload Failed", data.error || "Failed to upload");
+          } else {
+            await fetchEvidence();
+          }
+        } catch {
+          Alert.alert("Upload Failed", "Network error");
+        } finally {
+          setUploading(false);
+        }
+      };
+      input.click();
+    }
+  };
+
+  const handleDelete = async (evidenceId: string) => {
+    Alert.alert("Delete Photo", "Are you sure you want to delete this photo?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                invite_id: inviteId,
+                token: inviteToken,
+                action: "delete_evidence",
+                evidence_id: evidenceId,
+              }),
+            });
+            if (response.ok) {
+              setViewImage(null);
+              await fetchEvidence();
+            }
+          } catch {
+            Alert.alert("Error", "Failed to delete");
+          }
+        },
+      },
+    ]);
+  };
+
+  if (evidence.length === 0 && !canUpload) return null;
+
+  return (
+    <Card className="p-4 gap-3">
+      <Text className="text-foreground font-semibold">Evidence Photos</Text>
+
+      {evidence.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+          {evidence.map((item) => (
+            <Pressable key={item.id} onPress={() => setViewImage(item)}>
+              <View className="gap-1">
+                {item.signed_url ? (
+                  <Image
+                    source={{ uri: item.signed_url }}
+                    style={{ height: 80, width: 80, borderRadius: 8 }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={{ height: 80, width: 80, borderRadius: 8 }} className="bg-secondary items-center justify-center">
+                    <Text style={{ fontSize: 8 }} className="text-muted-foreground">No preview</Text>
+                  </View>
+                )}
+                <Text className="text-muted-foreground text-center" style={{ fontSize: 9 }}>
+                  {item.user_role === "buyer" ? "Buyer" : "Seller"}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+
+      {evidence.length === 0 && (
+        <Text className="text-muted-foreground text-sm text-center">
+          No evidence photos yet. Upload photos of the item before shipping.
+        </Text>
+      )}
+
+      {canUpload && (
+        <Button variant="outline" onPress={handleUpload} disabled={uploading}>
+          <Text className="text-foreground font-medium">
+            {uploading ? "Uploading..." : "Add Pre-Delivery Photo"}
+          </Text>
+        </Button>
+      )}
+
+      {/* Image viewer overlay */}
+      {viewImage && viewImage.signed_url && (
+        <View
+          style={{
+            position: "fixed" as any,
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.9)",
+            zIndex: 999,
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <Pressable
+            style={{
+              position: "absolute",
+              top: 40,
+              right: 20,
+              backgroundColor: "rgba(255,255,255,0.3)",
+              borderRadius: 20,
+              width: 40,
+              height: 40,
+              justifyContent: "center",
+              alignItems: "center",
+              zIndex: 1000,
+            }}
+            onPress={() => setViewImage(null)}
+          >
+            <Text style={{ color: "#fff", fontSize: 18, fontWeight: "bold" }}>✕</Text>
+          </Pressable>
+
+          {viewImage.can_delete && (
+            <Pressable
+              style={{
+                position: "absolute",
+                top: 40,
+                left: 20,
+                backgroundColor: "rgba(255,60,60,0.4)",
+                borderRadius: 20,
+                width: 40,
+                height: 40,
+                justifyContent: "center",
+                alignItems: "center",
+                zIndex: 1000,
+              }}
+              onPress={() => handleDelete(viewImage.id)}
+            >
+              <Text style={{ color: "#fff", fontSize: 16 }}>🗑</Text>
+            </Pressable>
+          )}
+
+          <Image
+            source={{ uri: viewImage.signed_url }}
+            style={{ width: "90%", height: "70%" } as any}
+            resizeMode="contain"
+          />
+          <Text style={{ color: "#fff", fontSize: 13, textAlign: "center", marginTop: 12 }}>
+            {viewImage.user_role === "buyer" ? "Buyer" : "Seller"} •{" "}
+            {EVIDENCE_TYPE_LABELS[viewImage.evidence_type] ?? viewImage.evidence_type}
+          </Text>
+        </View>
+      )}
+    </Card>
   );
 }
 
@@ -505,6 +750,15 @@ export default function InviteScreen() {
                 <Text className="text-foreground font-semibold mb-1">Progress</Text>
                 <StatusTimeline currentStatus={status} />
               </Card>
+            )}
+
+            {/* Evidence photos */}
+            {id && token && (
+              <WebEvidenceSection
+                inviteId={id}
+                inviteToken={token}
+                status={status}
+              />
             )}
 
             {/* Seller actions */}

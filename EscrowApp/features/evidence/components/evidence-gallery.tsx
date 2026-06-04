@@ -7,9 +7,10 @@ import { formatRelativeDate } from "@/lib/format";
 import { useState, useEffect, useCallback } from "react";
 import {
   ActivityIndicator,
-  FlatList,
+  Alert,
   Image,
   Pressable,
+  ScrollView,
   View,
 } from "react-native";
 
@@ -18,9 +19,11 @@ type Evidence = Database["public"]["Tables"]["evidence"]["Row"];
 type Props = {
   evidence: Evidence[];
   isLoading: boolean;
+  currentUserId?: string;
+  onDelete?: (evidenceId: string, imagePath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
 };
 
-type EvidenceWithUrl = Evidence & { signedUrl: string | null };
+type EvidenceWithUrl = Evidence & { imageUri: string | null; loadError: string | null };
 
 const EVIDENCE_TYPE_LABELS: Record<string, string> = {
   item_photo: "Item Photo",
@@ -31,12 +34,15 @@ const EVIDENCE_TYPE_LABELS: Record<string, string> = {
   unboxing: "Unboxing",
 };
 
-export function EvidenceGallery({ evidence, isLoading }: Props) {
+export function EvidenceGallery({ evidence, isLoading, currentUserId, onDelete }: Props) {
   const [items, setItems] = useState<EvidenceWithUrl[]>([]);
   const [loadingUrls, setLoadingUrls] = useState(false);
   const [viewerImage, setViewerImage] = useState<{
     url: string;
     caption: string;
+    evidenceId: string;
+    imagePath: string;
+    canDelete: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -48,13 +54,30 @@ export function EvidenceGallery({ evidence, isLoading }: Props) {
     let cancelled = false;
     setLoadingUrls(true);
 
-    async function loadUrls() {
+    async function loadImages() {
       const withUrls = await Promise.all(
         evidence.map(async (e) => {
-          const { data } = await supabase.storage
-            .from("evidence")
-            .createSignedUrl(e.image_url, 3600);
-          return { ...e, signedUrl: data?.signedUrl ?? null };
+          try {
+            const { data: signedData, error: signedError } = await supabase.storage
+              .from("evidence")
+              .createSignedUrl(e.image_url, 3600);
+
+            if (signedError || !signedData?.signedUrl) {
+              return {
+                ...e,
+                imageUri: null,
+                loadError: signedError?.message ?? "Failed to generate URL",
+              };
+            }
+
+            return { ...e, imageUri: signedData.signedUrl, loadError: null };
+          } catch (err) {
+            return {
+              ...e,
+              imageUri: null,
+              loadError: err instanceof Error ? err.message : "Failed to load",
+            };
+          }
         }),
       );
       if (!cancelled) {
@@ -63,14 +86,14 @@ export function EvidenceGallery({ evidence, isLoading }: Props) {
       }
     }
 
-    loadUrls();
+    loadImages();
     return () => {
       cancelled = true;
     };
   }, [evidence]);
 
   const handlePress = useCallback((item: EvidenceWithUrl) => {
-    if (!item.signedUrl) return;
+    if (!item.imageUri) return;
     const typeLabel =
       EVIDENCE_TYPE_LABELS[item.evidence_type] ?? item.evidence_type;
     const roleLabel =
@@ -80,8 +103,23 @@ export function EvidenceGallery({ evidence, isLoading }: Props) {
         ? "Seller"
         : "Admin";
     const caption = `${roleLabel} • ${typeLabel}${item.notes ? `\n${item.notes}` : ""}\n${formatRelativeDate(item.created_at)}`;
-    setViewerImage({ url: item.signedUrl, caption });
-  }, []);
+    const canDelete = !!currentUserId && item.uploaded_by === currentUserId;
+    setViewerImage({
+      url: item.imageUri,
+      caption,
+      evidenceId: item.id,
+      imagePath: item.image_url,
+      canDelete,
+    });
+  }, [currentUserId]);
+
+  const handleDelete = useCallback(async () => {
+    if (!viewerImage || !onDelete) return;
+    const result = await onDelete(viewerImage.evidenceId, viewerImage.imagePath);
+    if (!result.ok) {
+      Alert.alert("Delete Failed", result.error);
+    }
+  }, [viewerImage, onDelete]);
 
   if (isLoading || loadingUrls) {
     return (
@@ -103,24 +141,25 @@ export function EvidenceGallery({ evidence, isLoading }: Props) {
 
   return (
     <>
-      <FlatList
-        data={items}
-        keyExtractor={(item) => item.id}
+      <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ gap: 8 }}
-        renderItem={({ item }) => (
-          <Pressable onPress={() => handlePress(item)}>
+      >
+        {items.map((item) => (
+          <Pressable key={item.id} onPress={() => handlePress(item)}>
             <View className="gap-1">
-              {item.signedUrl ? (
+              {item.imageUri ? (
                 <Image
-                  source={{ uri: item.signedUrl }}
+                  source={{ uri: item.imageUri }}
                   className="h-20 w-20 rounded-lg bg-secondary"
                   resizeMode="cover"
                 />
               ) : (
-                <View className="h-20 w-20 rounded-lg bg-secondary items-center justify-center">
-                  <ActivityIndicator size="small" />
+                <View className="h-20 w-20 rounded-lg bg-destructive/10 items-center justify-center">
+                  <Text style={{ fontSize: 8 }} className="text-destructive text-center px-1">
+                    {item.loadError ?? "Error"}
+                  </Text>
                 </View>
               )}
               <Text
@@ -132,14 +171,16 @@ export function EvidenceGallery({ evidence, isLoading }: Props) {
               </Text>
             </View>
           </Pressable>
-        )}
-      />
+        ))}
+      </ScrollView>
 
       <ImageViewerModal
         visible={!!viewerImage}
         imageUrl={viewerImage?.url ?? null}
         caption={viewerImage?.caption}
+        canDelete={viewerImage?.canDelete ?? false}
         onClose={() => setViewerImage(null)}
+        onDelete={handleDelete}
       />
     </>
   );

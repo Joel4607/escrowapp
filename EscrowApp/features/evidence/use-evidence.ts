@@ -68,15 +68,15 @@ export function useEvidence(transactionId: string | undefined) {
         const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
         const storagePath = `${userId}/${transactionId}/${fileName}`;
 
-        // Read file as blob for upload
+        // Read the image file as ArrayBuffer and upload
+        const contentType = `image/${ext === "jpg" ? "jpeg" : ext}`;
         const response = await fetch(imageUri);
-        const blob = await response.blob();
+        const arrayBuffer = await response.arrayBuffer();
 
-        // Upload to Supabase Storage
         const { error: uploadError } = await supabase.storage
           .from("evidence")
-          .upload(storagePath, blob, {
-            contentType: `image/${ext === "jpg" ? "jpeg" : ext}`,
+          .upload(storagePath, arrayBuffer, {
+            contentType,
             upsert: false,
           });
 
@@ -129,12 +129,56 @@ export function useEvidence(transactionId: string | undefined) {
     [userId, transactionId],
   );
 
+  const deleteEvidence = useCallback(
+    async (evidenceId: string, imagePath: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      if (!userId || !transactionId) {
+        return { ok: false, error: "Not authenticated" };
+      }
+
+      try {
+        // Delete from storage
+        const { error: storageError } = await supabase.storage
+          .from("evidence")
+          .remove([imagePath]);
+
+        if (storageError) {
+          return { ok: false, error: storageError.message };
+        }
+
+        // Delete the database record
+        const { error: dbError } = await supabase
+          .from("evidence")
+          .delete()
+          .eq("id", evidenceId)
+          .eq("uploaded_by", userId);
+
+        if (dbError) {
+          return { ok: false, error: dbError.message };
+        }
+
+        // Invalidate cache
+        queryClient.invalidateQueries({
+          queryKey: ["evidence", transactionId],
+        });
+
+        return { ok: true };
+      } catch (e) {
+        return {
+          ok: false,
+          error: e instanceof Error ? e.message : "Delete failed",
+        };
+      }
+    },
+    [userId, transactionId],
+  );
+
   return {
     evidence: data ?? [],
     isLoading,
     error: error ? (error as Error).message : null,
     refetch,
     uploadEvidence,
+    deleteEvidence,
     getSignedUrl,
   };
 }

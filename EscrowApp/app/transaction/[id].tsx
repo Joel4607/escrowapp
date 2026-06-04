@@ -938,6 +938,7 @@ function EvidenceSection({
   evidenceLoading,
   uploading,
   onImageSelected,
+  onDeleteEvidence,
   currentUserId,
 }: {
   transaction: Transaction;
@@ -945,6 +946,7 @@ function EvidenceSection({
   evidenceLoading: boolean;
   uploading: boolean;
   onImageSelected: (uri: string, type: EvidenceType) => void;
+  onDeleteEvidence: (evidenceId: string, imagePath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   currentUserId?: string;
 }) {
   const isBuyer = transaction.buyer_id === currentUserId;
@@ -955,7 +957,7 @@ function EvidenceSection({
   let uploadType: EvidenceType = "item_photo";
   let uploadLabel = "Add Photo";
 
-  if (isSeller && ["funded", "in_delivery"].includes(transaction.status)) {
+  if (isSeller && ["accepted", "funded", "in_delivery"].includes(transaction.status)) {
     canUpload = true;
     uploadType = "pre_delivery";
     uploadLabel = "Add Pre-Delivery Photo";
@@ -975,9 +977,9 @@ function EvidenceSection({
     uploadLabel = "Add Dispute Evidence";
   }
 
-  // Don't show section at all before funding
+  // Don't show section before seller accepts (buyer has nothing to upload yet)
   if (
-    ["created", "seller_invited", "accepted"].includes(transaction.status) &&
+    ["created", "seller_invited"].includes(transaction.status) &&
     evidence.length === 0
   ) {
     return null;
@@ -985,7 +987,12 @@ function EvidenceSection({
 
   return (
     <SectionCard title="Evidence">
-      <EvidenceGallery evidence={evidence} isLoading={evidenceLoading} />
+      <EvidenceGallery
+        evidence={evidence}
+        isLoading={evidenceLoading}
+        currentUserId={currentUserId}
+        onDelete={onDeleteEvidence}
+      />
       {canUpload && (
         <View className="mt-2">
           <EvidenceUploadButton
@@ -1014,6 +1021,7 @@ export default function TransactionDetailScreen() {
     evidence,
     isLoading: evidenceLoading,
     uploadEvidence,
+    deleteEvidence,
   } = useEvidence(id);
   const [uploading, setUploading] = useState(false);
 
@@ -1184,6 +1192,7 @@ export default function TransactionDetailScreen() {
           evidenceLoading={evidenceLoading}
           uploading={uploading}
           onImageSelected={handleImageSelected}
+          onDeleteEvidence={deleteEvidence}
           currentUserId={session?.user?.id}
         />
 

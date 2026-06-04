@@ -95,7 +95,8 @@ Deno.serve(async (req) => {
     }
 
     const supabase = getSupabase();
-    const { invite_id, token, action, reason, description } = await req.json();
+    const body = await req.json();
+    const { invite_id, token, action, reason, description, image_base64, evidence_type, notes: evidenceNotes, evidence_id } = body;
 
     if (!invite_id || !token || !action) {
       return new Response(
@@ -336,6 +337,155 @@ Deno.serve(async (req) => {
             "Other",
           ],
         }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Evidence actions ──
+
+    if (action === "get_evidence") {
+      const { data: rows, error: evidenceError } = await supabase
+        .from("evidence")
+        .select("id, evidence_type, user_role, image_url, notes, created_at, uploaded_by")
+        .eq("transaction_id", tx.id)
+        .order("created_at", { ascending: true });
+
+      if (evidenceError) throw evidenceError;
+
+      // Generate signed URLs for each evidence item
+      const items = await Promise.all(
+        (rows ?? []).map(async (row) => {
+          const { data: urlData } = await supabase.storage
+            .from("evidence")
+            .createSignedUrl(row.image_url, 3600);
+          return {
+            ...row,
+            signed_url: urlData?.signedUrl ?? null,
+            can_delete: row.uploaded_by === tx.seller_id,
+          };
+        })
+      );
+
+      return new Response(
+        JSON.stringify({ evidence: items }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "upload_evidence") {
+      if (!image_base64) {
+        return new Response(
+          JSON.stringify({ error: "image_base64 is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Only allow upload in certain statuses
+      if (!["accepted", "funded", "in_delivery", "disputed", "admin_review"].includes(tx.status)) {
+        return new Response(
+          JSON.stringify({ error: `Cannot upload evidence in status: ${tx.status}` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const sellerId = tx.seller_id;
+      if (!sellerId) {
+        return new Response(
+          JSON.stringify({ error: "No seller assigned" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Decode base64 to binary
+      const binaryStr = atob(image_base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const storagePath = `${sellerId}/${tx.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("evidence")
+        .upload(storagePath, bytes, {
+          contentType: "image/jpeg",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        return new Response(
+          JSON.stringify({ error: uploadError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { error: insertError } = await supabase.from("evidence").insert({
+        transaction_id: tx.id,
+        uploaded_by: sellerId,
+        user_role: "seller",
+        evidence_type: evidence_type || "pre_delivery",
+        image_url: storagePath,
+        notes: evidenceNotes ?? null,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (insertError) {
+        return new Response(
+          JSON.stringify({ error: insertError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "delete_evidence") {
+      if (!evidence_id) {
+        return new Response(
+          JSON.stringify({ error: "evidence_id is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Fetch the evidence record and verify it belongs to the seller
+      const { data: evidenceRow, error: fetchError } = await supabase
+        .from("evidence")
+        .select("id, image_url, uploaded_by")
+        .eq("id", evidence_id)
+        .eq("transaction_id", tx.id)
+        .single();
+
+      if (fetchError || !evidenceRow) {
+        return new Response(
+          JSON.stringify({ error: "Evidence not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (evidenceRow.uploaded_by !== tx.seller_id) {
+        return new Response(
+          JSON.stringify({ error: "You can only delete your own evidence" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Delete from storage
+      await supabase.storage.from("evidence").remove([evidenceRow.image_url]);
+
+      // Delete from database
+      const { error: deleteError } = await supabase
+        .from("evidence")
+        .delete()
+        .eq("id", evidence_id);
+
+      if (deleteError) throw deleteError;
+
+      return new Response(
+        JSON.stringify({ success: true }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
