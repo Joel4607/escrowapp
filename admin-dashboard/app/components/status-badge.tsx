@@ -21,6 +21,10 @@ const STATUS_COLORS: Record<string, StatusVariant> = {
   cancelled: "default",
   expired: "default",
   admin_review: "danger",
+  return_approved: "info",
+  return_in_progress: "warning",
+  return_delivered: "info",
+  return_inspection: "warning",
 
   // Dispute statuses
   open: "danger",

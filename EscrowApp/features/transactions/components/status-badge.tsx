@@ -26,6 +26,10 @@ const STATUS_STYLES: Record<
   cancelled: { bg: "bg-destructive/15", text: "text-red-400", dot: "bg-red-400" },
   expired: { bg: "bg-muted", text: "text-muted-foreground", dot: "bg-muted-foreground" },
   admin_review: { bg: "bg-purple-500/15", text: "text-purple-400", dot: "bg-purple-400" },
+  return_approved: { bg: "bg-blue-500/15", text: "text-blue-400", dot: "bg-blue-400" },
+  return_in_progress: { bg: "bg-orange-500/15", text: "text-orange-400", dot: "bg-orange-400" },
+  return_delivered: { bg: "bg-blue-500/15", text: "text-blue-400", dot: "bg-blue-400" },
+  return_inspection: { bg: "bg-yellow-500/15", text: "text-yellow-400", dot: "bg-yellow-400" },
 };
 
 export function StatusBadge({ status }: StatusBadgeProps) {

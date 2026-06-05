@@ -28,6 +28,10 @@ const STATUS_LABELS: Record<TransactionStatus, string> = {
   cancelled: "Cancelled",
   expired: "Expired",
   admin_review: "Under Review",
+  return_approved: "Return Approved",
+  return_in_progress: "Return In Transit",
+  return_delivered: "Return Received",
+  return_inspection: "Return Inspection",
 };
 
 export function getStatusLabel(status: TransactionStatus): string {
@@ -52,6 +56,10 @@ const STATUS_VARIANTS: Record<TransactionStatus, BadgeVariant> = {
   cancelled: "destructive",
   expired: "destructive",
   admin_review: "destructive",
+  return_approved: "secondary",
+  return_in_progress: "default",
+  return_delivered: "default",
+  return_inspection: "secondary",
 };
 
 export function getStatusVariant(status: TransactionStatus): BadgeVariant {
