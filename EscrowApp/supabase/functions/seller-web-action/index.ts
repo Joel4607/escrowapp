@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
 
     const supabase = getSupabase();
     const body = await req.json();
-    const { invite_id, token, action, reason, description, image_base64, evidence_type, notes: evidenceNotes, evidence_id } = body;
+    const { invite_id, token, action, reason, description, image_base64, evidence_type, notes: evidenceNotes, evidence_id, return_token, counter_reason, counter_description, category, phase } = body;
 
     if (!invite_id || !token || !action) {
       return new Response(
@@ -486,6 +486,403 @@ Deno.serve(async (req) => {
 
       return new Response(
         JSON.stringify({ success: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Return workflow actions ──
+
+    if (action === "get_return_details") {
+      // Fetch return transaction
+      const { data: returnTx } = await supabase
+        .from("return_transactions")
+        .select("*")
+        .eq("original_transaction_id", tx.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // Fetch counter-dispute if return exists
+      let counterDispute = null;
+      if (returnTx) {
+        const { data: cd } = await supabase
+          .from("counter_disputes")
+          .select("*")
+          .eq("return_transaction_id", returnTx.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        counterDispute = cd;
+      }
+
+      // Fetch return-phase evidence with signed URLs
+      const { data: returnEvidence } = await supabase
+        .from("evidence")
+        .select("id, evidence_type, user_role, image_url, notes, created_at, uploaded_by, phase, category")
+        .eq("transaction_id", tx.id)
+        .in("phase", ["return_shipment", "return_receipt", "counter_dispute"])
+        .order("created_at", { ascending: true });
+
+      const evidenceWithUrls = await Promise.all(
+        (returnEvidence ?? []).map(async (row) => {
+          const { data: urlData } = await supabase.storage
+            .from("evidence")
+            .createSignedUrl(row.image_url, 3600);
+          return {
+            ...row,
+            signed_url: urlData?.signedUrl ?? null,
+            can_delete: row.uploaded_by === tx.seller_id,
+          };
+        })
+      );
+
+      return new Response(
+        JSON.stringify({
+          return_transaction: returnTx,
+          counter_dispute: counterDispute,
+          evidence: evidenceWithUrls,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "confirm_return_receipt") {
+      if (!return_token) {
+        return new Response(
+          JSON.stringify({ error: "return_token is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Find active return transaction
+      const { data: returnTx } = await supabase
+        .from("return_transactions")
+        .select("*")
+        .eq("original_transaction_id", tx.id)
+        .eq("status", "in_transit")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!returnTx) {
+        return new Response(
+          JSON.stringify({ error: "No return in transit" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const trimmedToken = return_token.trim().toUpperCase();
+
+      // Validate token
+      const { data: tokenRow, error: tokenError } = await supabase
+        .from("delivery_tokens")
+        .select("*")
+        .eq("transaction_id", tx.id)
+        .eq("token_hash", trimmedToken)
+        .eq("is_used", false)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (tokenError || !tokenRow) {
+        return new Response(
+          JSON.stringify({ error: "Invalid or already used return token" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Mark token used
+      await supabase
+        .from("delivery_tokens")
+        .update({ is_used: true, used_at: new Date().toISOString() })
+        .eq("id", tokenRow.id);
+
+      // Calculate inspection deadline
+      const inspectionDeadline = new Date(
+        Date.now() + tx.inspection_period * 60 * 60 * 1000
+      ).toISOString();
+
+      // Update return transaction
+      await supabase
+        .from("return_transactions")
+        .update({
+          status: "inspection",
+          delivered_at: new Date().toISOString(),
+          inspection_deadline: inspectionDeadline,
+        })
+        .eq("id", returnTx.id);
+
+      // Update original transaction
+      await supabase
+        .from("transactions")
+        .update({ status: "return_delivered" })
+        .eq("id", tx.id);
+
+      // Audit log
+      await supabase.from("audit_logs").insert({
+        transaction_id: tx.id,
+        user_id: tx.seller_id,
+        user_role: "seller",
+        action: "RETURN_RECEIVED",
+        description: "Seller confirmed receipt of returned item via web",
+        metadata: { return_transaction_id: returnTx.id, inspection_deadline: inspectionDeadline },
+      });
+
+      return new Response(
+        JSON.stringify({ success: true, inspection_deadline: inspectionDeadline }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "upload_return_evidence") {
+      if (!image_base64) {
+        return new Response(
+          JSON.stringify({ error: "image_base64 is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const sellerId = tx.seller_id;
+      if (!sellerId) {
+        return new Response(
+          JSON.stringify({ error: "No seller assigned" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const evidenceCategory = category || "other";
+      const evidencePhase = phase || "return_receipt";
+
+      const binaryStr = atob(image_base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const storagePath = `${sellerId}/${tx.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("evidence")
+        .upload(storagePath, bytes, { contentType: "image/jpeg", upsert: false });
+
+      if (uploadError) {
+        return new Response(
+          JSON.stringify({ error: uploadError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { error: insertError } = await supabase.from("evidence").insert({
+        transaction_id: tx.id,
+        uploaded_by: sellerId,
+        user_role: "seller",
+        evidence_type: evidence_type || "received_item",
+        image_url: storagePath,
+        notes: evidenceNotes ?? null,
+        timestamp: new Date().toISOString(),
+        phase: evidencePhase,
+        category: evidenceCategory,
+      });
+
+      if (insertError) {
+        return new Response(
+          JSON.stringify({ error: insertError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "approve_return") {
+      const { data: returnTx } = await supabase
+        .from("return_transactions")
+        .select("*")
+        .eq("original_transaction_id", tx.id)
+        .eq("status", "inspection")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!returnTx) {
+        return new Response(
+          JSON.stringify({ error: "No return under inspection" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const sellerId = tx.seller_id;
+      if (!sellerId) {
+        return new Response(
+          JSON.stringify({ error: "No seller assigned" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Refund buyer
+      const { data: buyer } = await supabase
+        .from("users")
+        .select("wallet_balance, locked_balance")
+        .eq("id", tx.buyer_id)
+        .single();
+
+      if (buyer) {
+        await supabase
+          .from("users")
+          .update({
+            wallet_balance: buyer.wallet_balance + tx.price,
+            locked_balance: Math.max(0, buyer.locked_balance - tx.price),
+          })
+          .eq("id", tx.buyer_id);
+      }
+
+      // Update ledger
+      await supabase
+        .from("escrow_ledger")
+        .update({ status: "failed" })
+        .eq("transaction_id", tx.id)
+        .eq("type", "fund")
+        .eq("status", "locked");
+
+      await supabase.from("escrow_ledger").insert({
+        transaction_id: tx.id,
+        from_user_id: sellerId,
+        to_user_id: tx.buyer_id,
+        amount: tx.price,
+        type: "refund",
+        status: "completed",
+      });
+
+      // Update return transaction
+      await supabase
+        .from("return_transactions")
+        .update({ status: "approved", resolved_at: new Date().toISOString(), resolution: "approved" })
+        .eq("id", returnTx.id);
+
+      // Update original transaction
+      await supabase
+        .from("transactions")
+        .update({ status: "refunded" })
+        .eq("id", tx.id);
+
+      // Resolve dispute
+      await supabase
+        .from("disputes")
+        .update({
+          status: "resolved",
+          admin_decision: "return_approved_by_seller",
+          resolution_type: "refund",
+          resolved_at: new Date().toISOString(),
+        })
+        .eq("id", returnTx.dispute_id);
+
+      // Audit log
+      await supabase.from("audit_logs").insert({
+        transaction_id: tx.id,
+        user_id: sellerId,
+        user_role: "seller",
+        action: "RETURN_APPROVED_BY_SELLER",
+        description: "Seller approved return via web. Full refund issued to buyer.",
+        metadata: { return_transaction_id: returnTx.id, refund_amount: tx.price },
+      });
+
+      return new Response(
+        JSON.stringify({ success: true, new_status: "refunded" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "raise_counter_dispute") {
+      if (!counter_reason || typeof counter_reason !== "string" || counter_reason.trim() === "") {
+        return new Response(
+          JSON.stringify({ error: "Reason is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { data: returnTx } = await supabase
+        .from("return_transactions")
+        .select("*")
+        .eq("original_transaction_id", tx.id)
+        .eq("status", "inspection")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!returnTx) {
+        return new Response(
+          JSON.stringify({ error: "No return under inspection. Counter-disputes can only be raised during inspection." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const sellerId = tx.seller_id;
+      if (!sellerId) {
+        return new Response(
+          JSON.stringify({ error: "No seller assigned" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Check no existing active counter-dispute
+      const { data: existingCd } = await supabase
+        .from("counter_disputes")
+        .select("id")
+        .eq("return_transaction_id", returnTx.id)
+        .neq("status", "resolved")
+        .limit(1)
+        .maybeSingle();
+
+      if (existingCd) {
+        return new Response(
+          JSON.stringify({ error: "An active counter-dispute already exists" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Create counter-dispute
+      const { data: newCd, error: cdError } = await supabase
+        .from("counter_disputes")
+        .insert({
+          return_transaction_id: returnTx.id,
+          original_dispute_id: returnTx.dispute_id,
+          opened_by: sellerId,
+          reason: counter_reason.trim(),
+          description: counter_description ? counter_description.trim() || null : null,
+          status: "open",
+        })
+        .select("id")
+        .single();
+
+      if (cdError) {
+        return new Response(
+          JSON.stringify({ error: cdError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Update return transaction
+      await supabase
+        .from("return_transactions")
+        .update({ status: "counter_disputed" })
+        .eq("id", returnTx.id);
+
+      // Audit log
+      await supabase.from("audit_logs").insert({
+        transaction_id: tx.id,
+        user_id: sellerId,
+        user_role: "seller",
+        action: "COUNTER_DISPUTE_RAISED",
+        description: "Seller raised counter-dispute via web: " + counter_reason.trim(),
+        metadata: { return_transaction_id: returnTx.id, counter_dispute_id: newCd.id, reason: counter_reason.trim() },
+      });
+
+      return new Response(
+        JSON.stringify({ success: true, counter_dispute_id: newCd.id }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
