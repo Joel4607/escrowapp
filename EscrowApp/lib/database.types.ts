@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -64,6 +64,76 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      counter_disputes: {
+        Row: {
+          admin_decision: string | null
+          admin_notes: string | null
+          created_at: string
+          description: string | null
+          id: string
+          opened_by: string
+          original_dispute_id: string
+          reason: string
+          refund_amount: number | null
+          resolution_type: string | null
+          resolved_at: string | null
+          return_transaction_id: string
+          status: Database["public"]["Enums"]["dispute_status"]
+        }
+        Insert: {
+          admin_decision?: string | null
+          admin_notes?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          opened_by: string
+          original_dispute_id: string
+          reason: string
+          refund_amount?: number | null
+          resolution_type?: string | null
+          resolved_at?: string | null
+          return_transaction_id: string
+          status?: Database["public"]["Enums"]["dispute_status"]
+        }
+        Update: {
+          admin_decision?: string | null
+          admin_notes?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          opened_by?: string
+          original_dispute_id?: string
+          reason?: string
+          refund_amount?: number | null
+          resolution_type?: string | null
+          resolved_at?: string | null
+          return_transaction_id?: string
+          status?: Database["public"]["Enums"]["dispute_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "counter_disputes_opened_by_fkey"
+            columns: ["opened_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "counter_disputes_original_dispute_id_fkey"
+            columns: ["original_dispute_id"]
+            isOneToOne: false
+            referencedRelation: "disputes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "counter_disputes_return_transaction_id_fkey"
+            columns: ["return_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "return_transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -244,6 +314,7 @@ export type Database = {
       }
       evidence: {
         Row: {
+          category: string | null
           created_at: string
           evidence_type: string
           id: string
@@ -252,12 +323,14 @@ export type Database = {
           location: string | null
           metadata: Json | null
           notes: string | null
+          phase: string | null
           timestamp: string
           transaction_id: string
           uploaded_by: string
           user_role: Database["public"]["Enums"]["user_role"]
         }
         Insert: {
+          category?: string | null
           created_at?: string
           evidence_type: string
           id?: string
@@ -266,12 +339,14 @@ export type Database = {
           location?: string | null
           metadata?: Json | null
           notes?: string | null
+          phase?: string | null
           timestamp?: string
           transaction_id: string
           uploaded_by: string
           user_role: Database["public"]["Enums"]["user_role"]
         }
         Update: {
+          category?: string | null
           created_at?: string
           evidence_type?: string
           id?: string
@@ -280,6 +355,7 @@ export type Database = {
           location?: string | null
           metadata?: Json | null
           notes?: string | null
+          phase?: string | null
           timestamp?: string
           transaction_id?: string
           uploaded_by?: string
@@ -301,6 +377,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      evidence_requirements: {
+        Row: {
+          category: string
+          description: string
+          id: string
+          is_required: boolean
+          label: string
+          phase: string
+          sort_order: number
+        }
+        Insert: {
+          category: string
+          description: string
+          id?: string
+          is_required?: boolean
+          label: string
+          phase: string
+          sort_order?: number
+        }
+        Update: {
+          category?: string
+          description?: string
+          id?: string
+          is_required?: boolean
+          label?: string
+          phase?: string
+          sort_order?: number
+        }
+        Relationships: []
       }
       fraud_flags: {
         Row: {
@@ -478,6 +584,85 @@ export type Database = {
           },
         ]
       }
+      return_transactions: {
+        Row: {
+          admin_notes: string | null
+          buyer_location: string | null
+          created_at: string
+          created_by: string | null
+          delivered_at: string | null
+          dispute_id: string
+          id: string
+          inspection_deadline: string | null
+          original_transaction_id: string
+          resolution: string | null
+          resolved_at: string | null
+          return_deadline: string
+          seller_location: string | null
+          seller_return_conditions: string | null
+          shipped_at: string | null
+          status: Database["public"]["Enums"]["return_status"]
+        }
+        Insert: {
+          admin_notes?: string | null
+          buyer_location?: string | null
+          created_at?: string
+          created_by?: string | null
+          delivered_at?: string | null
+          dispute_id: string
+          id?: string
+          inspection_deadline?: string | null
+          original_transaction_id: string
+          resolution?: string | null
+          resolved_at?: string | null
+          return_deadline: string
+          seller_location?: string | null
+          seller_return_conditions?: string | null
+          shipped_at?: string | null
+          status?: Database["public"]["Enums"]["return_status"]
+        }
+        Update: {
+          admin_notes?: string | null
+          buyer_location?: string | null
+          created_at?: string
+          created_by?: string | null
+          delivered_at?: string | null
+          dispute_id?: string
+          id?: string
+          inspection_deadline?: string | null
+          original_transaction_id?: string
+          resolution?: string | null
+          resolved_at?: string | null
+          return_deadline?: string
+          seller_location?: string | null
+          seller_return_conditions?: string | null
+          shipped_at?: string | null
+          status?: Database["public"]["Enums"]["return_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "return_transactions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "return_transactions_dispute_id_fkey"
+            columns: ["dispute_id"]
+            isOneToOne: false
+            referencedRelation: "disputes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "return_transactions_original_transaction_id_fkey"
+            columns: ["original_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       transaction_archives: {
         Row: {
           archived_at: string
@@ -573,6 +758,7 @@ export type Database = {
         Row: {
           accepted_at: string | null
           buyer_id: string
+          buyer_location: string | null
           created_at: string
           delivered_at: string | null
           delivery_deadline: string
@@ -591,6 +777,8 @@ export type Database = {
           resolved_at: string | null
           seller_contact: string
           seller_id: string | null
+          seller_location: string | null
+          seller_return_conditions: string | null
           status: Database["public"]["Enums"]["transaction_status"]
           terms_accepted_by_buyer: boolean
           terms_accepted_by_seller: boolean
@@ -600,6 +788,7 @@ export type Database = {
         Insert: {
           accepted_at?: string | null
           buyer_id: string
+          buyer_location?: string | null
           created_at?: string
           delivered_at?: string | null
           delivery_deadline: string
@@ -618,6 +807,8 @@ export type Database = {
           resolved_at?: string | null
           seller_contact: string
           seller_id?: string | null
+          seller_location?: string | null
+          seller_return_conditions?: string | null
           status?: Database["public"]["Enums"]["transaction_status"]
           terms_accepted_by_buyer?: boolean
           terms_accepted_by_seller?: boolean
@@ -627,6 +818,7 @@ export type Database = {
         Update: {
           accepted_at?: string | null
           buyer_id?: string
+          buyer_location?: string | null
           created_at?: string
           delivered_at?: string | null
           delivery_deadline?: string
@@ -645,6 +837,8 @@ export type Database = {
           resolved_at?: string | null
           seller_contact?: string
           seller_id?: string | null
+          seller_location?: string | null
+          seller_return_conditions?: string | null
           status?: Database["public"]["Enums"]["transaction_status"]
           terms_accepted_by_buyer?: boolean
           terms_accepted_by_seller?: boolean
@@ -723,21 +917,72 @@ export type Database = {
         Returns: undefined
       }
       add_wallet_funds: { Args: { p_amount: number }; Returns: undefined }
+      admin_approve_return: {
+        Args: {
+          p_admin_notes?: string
+          p_deadline_days: number
+          p_dispute_id: string
+        }
+        Returns: Json
+      }
+      admin_request_evidence: {
+        Args: { p_admin_notes?: string; p_dispute_id: string }
+        Returns: Json
+      }
+      admin_resolve_counter_dispute: {
+        Args: {
+          p_admin_notes?: string
+          p_counter_dispute_id: string
+          p_decision: string
+          p_refund_amount?: number
+        }
+        Returns: Json
+      }
+      admin_resolve_dispute: {
+        Args: {
+          p_admin_notes?: string
+          p_decision: string
+          p_dispute_id: string
+          p_refund_amount?: number
+        }
+        Returns: Json
+      }
+      approve_return: {
+        Args: { p_return_transaction_id: string }
+        Returns: undefined
+      }
       cancel_escrow: { Args: { p_transaction_id: string }; Returns: undefined }
       confirm_delivery: {
         Args: { p_token: string; p_transaction_id: string }
+        Returns: undefined
+      }
+      confirm_return_delivery: {
+        Args: { p_return_transaction_id: string; p_token: string }
         Returns: undefined
       }
       delete_transaction: {
         Args: { p_transaction_id: string }
         Returns: undefined
       }
+      expire_overdue_returns: { Args: never; Returns: Json }
       fund_escrow: { Args: { p_transaction_id: string }; Returns: undefined }
       generate_delivery_token: {
         Args: { p_transaction_id: string }
         Returns: string
       }
+      generate_return_delivery_token: {
+        Args: { p_return_transaction_id: string }
+        Returns: string
+      }
       is_admin: { Args: never; Returns: boolean }
+      raise_counter_dispute: {
+        Args: {
+          p_description?: string
+          p_reason: string
+          p_return_transaction_id: string
+        }
+        Returns: string
+      }
       raise_dispute: {
         Args: {
           p_description?: string
@@ -753,7 +998,7 @@ export type Database = {
       release_escrow: { Args: { p_transaction_id: string }; Returns: undefined }
     }
     Enums: {
-      dispute_status: "open" | "under_review" | "resolved"
+      dispute_status: "open" | "under_review" | "awaiting_evidence" | "resolved"
       fraud_flag_status: "active" | "dismissed" | "confirmed"
       fraud_risk_level: "low" | "medium" | "high"
       invite_status:
@@ -772,6 +1017,16 @@ export type Database = {
         | "refund"
         | "partial_refund"
         | "return_required"
+      return_status:
+        | "created"
+        | "awaiting_shipment"
+        | "in_transit"
+        | "delivered"
+        | "inspection"
+        | "approved"
+        | "counter_disputed"
+        | "resolved"
+        | "expired"
       transaction_status:
         | "created"
         | "seller_invited"
@@ -788,6 +1043,10 @@ export type Database = {
         | "cancelled"
         | "expired"
         | "admin_review"
+        | "return_approved"
+        | "return_in_progress"
+        | "return_delivered"
+        | "return_inspection"
       user_role: "buyer" | "seller" | "admin"
     }
     CompositeTypes: {
@@ -916,7 +1175,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      dispute_status: ["open", "under_review", "resolved"],
+      dispute_status: ["open", "under_review", "awaiting_evidence", "resolved"],
       fraud_flag_status: ["active", "dismissed", "confirmed"],
       fraud_risk_level: ["low", "medium", "high"],
       invite_status: [
@@ -937,6 +1196,17 @@ export const Constants = {
         "partial_refund",
         "return_required",
       ],
+      return_status: [
+        "created",
+        "awaiting_shipment",
+        "in_transit",
+        "delivered",
+        "inspection",
+        "approved",
+        "counter_disputed",
+        "resolved",
+        "expired",
+      ],
       transaction_status: [
         "created",
         "seller_invited",
@@ -953,19 +1223,14 @@ export const Constants = {
         "cancelled",
         "expired",
         "admin_review",
+        "return_approved",
+        "return_in_progress",
+        "return_delivered",
+        "return_inspection",
       ],
       user_role: ["buyer", "seller", "admin"],
     },
   },
 } as const
-
-export type TransactionStatus = Database["public"]["Enums"]["transaction_status"];
-export type UserRole = Database["public"]["Enums"]["user_role"];
-export type LedgerType = Database["public"]["Enums"]["ledger_type"];
-export type LedgerStatus = Database["public"]["Enums"]["ledger_status"];
-export type DisputeStatus = Database["public"]["Enums"]["dispute_status"];
-export type ResolutionType = Database["public"]["Enums"]["resolution_type"];
-export type FraudRiskLevel = Database["public"]["Enums"]["fraud_risk_level"];
-export type FraudFlagStatus = Database["public"]["Enums"]["fraud_flag_status"];
-export type InviteStatus = Database["public"]["Enums"]["invite_status"];
-export type OtpPurpose = Database["public"]["Enums"]["otp_purpose"];
+A new version of Supabase CLI is available: v2.105.0 (currently installed v2.101.0)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
