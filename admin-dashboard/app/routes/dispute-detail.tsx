@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
   Eye,
   X,
+  RotateCcw,
 } from "lucide-react"
 import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card"
@@ -31,7 +32,7 @@ import {
   formatDateTime,
   formatStatus,
 } from "~/lib/format"
-import type { Dispute, Evidence, AuditLog } from "~/lib/types"
+import type { Dispute, Evidence, AuditLog, ReturnTransaction, CounterDispute } from "~/lib/types"
 
 type FullDispute = Dispute & {
   transaction: {
@@ -42,6 +43,8 @@ type FullDispute = Dispute & {
     status: string
     buyer_id: string
     seller_id: string | null
+    buyer_location: string | null
+    seller_location: string | null
   } | null
   opener: { id: string; name: string | null; phone: string } | null
 }
@@ -70,6 +73,25 @@ export default function DisputeDetailPage() {
   const [submitting, setSubmitting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  // Return transaction & counter-dispute
+  const [returnTx, setReturnTx] = useState<ReturnTransaction | null>(null)
+  const [counterDispute, setCounterDispute] = useState<CounterDispute | null>(null)
+
+  // Return approval form
+  const [showReturnForm, setShowReturnForm] = useState(false)
+  const [returnDeadlineDays, setReturnDeadlineDays] = useState(7)
+  const [returnNotes, setReturnNotes] = useState("")
+  const [returnSubmitting, setReturnSubmitting] = useState(false)
+
+  // Evidence phase filter
+  const [evidencePhase, setEvidencePhase] = useState<string>("all")
+
+  // Counter-dispute resolution
+  const [counterDisputeDecision, setCounterDisputeDecision] = useState<string | null>(null)
+  const [counterDisputeNotes, setCounterDisputeNotes] = useState("")
+  const [counterDisputeAmount, setCounterDisputeAmount] = useState("")
+  const [counterDisputeSubmitting, setCounterDisputeSubmitting] = useState(false)
+
   // Lightbox
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
 
@@ -81,7 +103,7 @@ export default function DisputeDetailPage() {
       const { data: disputeData, error: dErr } = await supabase
         .from("disputes")
         .select(
-          "*, transaction:transactions(id, transaction_code, item_name, price, status, buyer_id, seller_id), opener:users!disputes_opened_by_fkey(id, name, phone)"
+          "*, transaction:transactions(id, transaction_code, item_name, price, status, buyer_id, seller_id, buyer_location, seller_location), opener:users!disputes_opened_by_fkey(id, name, phone)"
         )
         .eq("id", id)
         .single()
@@ -123,6 +145,30 @@ export default function DisputeDetailPage() {
         setEvidence(signed)
         setAuditLogs((logRes.data as AuditLog[]) ?? [])
       }
+
+      // Fetch return transaction if exists
+      const { data: returnTxData } = await supabase
+        .from("return_transactions")
+        .select("*")
+        .eq("dispute_id", d.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      setReturnTx(returnTxData as ReturnTransaction | null)
+
+      let counterDisputeData = null
+      if (returnTxData) {
+        const { data: cdData } = await supabase
+          .from("counter_disputes")
+          .select("*")
+          .eq("return_transaction_id", returnTxData.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        counterDisputeData = cdData
+      }
+      setCounterDispute(counterDisputeData as CounterDispute | null)
     } catch {
       setError("Failed to load dispute")
     } finally {
@@ -186,6 +232,55 @@ export default function DisputeDetailPage() {
     setActionError(null)
   }
 
+  const handleApproveReturn = async () => {
+    if (!dispute) return
+    setReturnSubmitting(true)
+    setActionError(null)
+    try {
+      const { error: err } = await supabase.rpc("admin_approve_return", {
+        p_dispute_id: dispute.id,
+        p_deadline_days: returnDeadlineDays,
+        p_admin_notes: returnNotes || null,
+      })
+      if (err) throw err
+      setShowReturnForm(false)
+      setReturnNotes("")
+      setReturnDeadlineDays(7)
+      await fetchData()
+    } catch (e: any) {
+      setActionError(e?.message ?? "Failed to approve return")
+    } finally {
+      setReturnSubmitting(false)
+    }
+  }
+
+  const handleResolveCounterDispute = async (decision: string) => {
+    if (!counterDispute) return
+    setCounterDisputeSubmitting(true)
+    setActionError(null)
+    try {
+      const params: Record<string, unknown> = {
+        p_counter_dispute_id: counterDispute.id,
+        p_decision: decision,
+        p_admin_notes: counterDisputeNotes || null,
+        p_refund_amount: decision === "partial_refund" ? parseFloat(counterDisputeAmount) : 0,
+      }
+      const { error: err } = await supabase.rpc(
+        "admin_resolve_counter_dispute",
+        params
+      )
+      if (err) throw err
+      setCounterDisputeDecision(null)
+      setCounterDisputeNotes("")
+      setCounterDisputeAmount("")
+      await fetchData()
+    } catch (e: any) {
+      setActionError(e?.message ?? "Failed to resolve counter-dispute")
+    } finally {
+      setCounterDisputeSubmitting(false)
+    }
+  }
+
   if (loading) return <PageLoader message="Loading dispute..." />
   if (error) return <PageError message={error} onRetry={fetchData} />
   if (!dispute) return <PageError message="Dispute not found" />
@@ -215,9 +310,22 @@ export default function DisputeDetailPage() {
     },
   }
 
-  // Split evidence by role for side-by-side view
-  const buyerEvidence = evidence.filter((e) => e.user_role === "buyer")
-  const sellerEvidence = evidence.filter((e) => e.user_role === "seller")
+  // Filter evidence by phase, then split by role for side-by-side view
+  const filteredEvidence =
+    evidencePhase === "all"
+      ? evidence
+      : evidence.filter((e) => e.phase === evidencePhase)
+  const buyerEvidence = filteredEvidence.filter((e) => e.user_role === "buyer")
+  const sellerEvidence = filteredEvidence.filter((e) => e.user_role === "seller")
+
+  const phaseTabs: { key: string; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "original", label: "Original" },
+    { key: "dispute", label: "Dispute" },
+    { key: "return_shipment", label: "Return Shipment" },
+    { key: "return_receipt", label: "Return Receipt" },
+    { key: "counter_dispute", label: "Counter-Dispute" },
+  ]
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -342,7 +450,7 @@ export default function DisputeDetailPage() {
         </Card>
       </div>
 
-      {/* Evidence Side-by-Side */}
+      {/* Evidence Side-by-Side with Phase Tabs */}
       {evidence.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
@@ -351,6 +459,27 @@ export default function DisputeDetailPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {/* Phase tabs */}
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {phaseTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setEvidencePhase(tab.key)}
+                  className={`px-3 py-1 rounded text-xs transition-colors ${
+                    evidencePhase === tab.key
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                  }`}
+                >
+                  {tab.label}
+                  {tab.key !== "all" && (
+                    <span className="ml-1 opacity-60">
+                      ({evidence.filter((e) => e.phase === tab.key).length})
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
             <div className="grid gap-6 md:grid-cols-2">
               {/* Buyer Evidence */}
               <div>
@@ -433,6 +562,164 @@ export default function DisputeDetailPage() {
         </Card>
       )}
 
+      {/* Return Transaction Tracking */}
+      {returnTx && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+              <RotateCcw className="h-4 w-4" />
+              Return Transaction
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Status</span>
+                <StatusBadge status={returnTx.status} />
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Deadline</span>
+                <span>{formatDateTime(returnTx.return_deadline)}</span>
+              </div>
+              {returnTx.shipped_at && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Shipped</span>
+                  <span>{formatDateTime(returnTx.shipped_at)}</span>
+                </div>
+              )}
+              {returnTx.delivered_at && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Delivered</span>
+                  <span>{formatDateTime(returnTx.delivered_at)}</span>
+                </div>
+              )}
+              {returnTx.inspection_deadline && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Inspection Deadline</span>
+                  <span>{formatDateTime(returnTx.inspection_deadline)}</span>
+                </div>
+              )}
+              {returnTx.seller_return_conditions && (
+                <div className="col-span-2">
+                  <span className="text-muted-foreground">Return conditions: </span>
+                  <span>{returnTx.seller_return_conditions}</span>
+                </div>
+              )}
+            </div>
+            {returnTx.admin_notes && (
+              <p className="text-xs text-muted-foreground">
+                Admin notes: {returnTx.admin_notes}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Counter-Dispute Resolution Panel */}
+      {counterDispute && counterDispute.status !== "resolved" && (
+        <Card className="border-orange-500/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-orange-600 dark:text-orange-400 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              Counter-Dispute &mdash; {counterDispute.reason}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {counterDispute.description && (
+              <p className="text-sm">{counterDispute.description}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Filed {formatDateTime(counterDispute.created_at)}
+            </p>
+
+            {/* Resolution buttons */}
+            {!counterDisputeDecision && (
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCounterDisputeDecision("refund_buyer")}
+                >
+                  <XCircle className="mr-1.5 h-4 w-4" />
+                  Refund Buyer
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                  onClick={() => setCounterDisputeDecision("release_to_seller")}
+                >
+                  <CheckCircle className="mr-1.5 h-4 w-4" />
+                  Release to Seller
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCounterDisputeDecision("partial_refund")}
+                >
+                  Partial Refund
+                </Button>
+              </div>
+            )}
+
+            {/* Confirmation form */}
+            {counterDisputeDecision && (
+              <div className="space-y-3 border rounded-lg p-4">
+                <h4 className="text-sm font-semibold">
+                  Confirm: {formatStatus(counterDisputeDecision)}
+                </h4>
+                {counterDisputeDecision === "partial_refund" && dispute?.transaction && (
+                  <div className="space-y-2">
+                    <Label>Refund amount to buyer (max {formatCurrency(dispute.transaction.price)})</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 500"
+                      value={counterDisputeAmount}
+                      onChange={(e) => setCounterDisputeAmount(e.target.value)}
+                      min={1}
+                      max={dispute.transaction.price - 1}
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>Admin Notes (optional)</Label>
+                  <Textarea
+                    placeholder="Reason for this decision..."
+                    value={counterDisputeNotes}
+                    onChange={(e) => setCounterDisputeNotes(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+                {actionError && (
+                  <p className="text-sm text-destructive">{actionError}</p>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleResolveCounterDispute(counterDisputeDecision)}
+                    disabled={counterDisputeSubmitting}
+                  >
+                    {counterDisputeSubmitting ? "Processing..." : "Confirm Decision"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setCounterDisputeDecision(null)
+                      setCounterDisputeNotes("")
+                      setCounterDisputeAmount("")
+                      setActionError(null)
+                    }}
+                    disabled={counterDisputeSubmitting}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Admin Decision Panel */}
       {isOpen && (
         <Card className="border-destructive/50">
@@ -492,7 +779,75 @@ export default function DisputeDetailPage() {
               >
                 Dismiss
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowReturnForm(!showReturnForm)}
+              >
+                <RotateCcw className="mr-1.5 h-4 w-4" />
+                Approve Return
+              </Button>
             </div>
+
+            {/* Approve Return inline form */}
+            {showReturnForm && (
+              <div className="mt-4 space-y-3 border rounded-lg p-4">
+                <h4 className="text-sm font-semibold">Approve Product Return</h4>
+                {dispute.transaction && (
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>Buyer location: {dispute.transaction.buyer_location || "Not set"}</p>
+                    <p>Seller location: {dispute.transaction.seller_location || "Not set"}</p>
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">Return deadline (days)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={returnDeadlineDays}
+                    onChange={(e) => setReturnDeadlineDays(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Suggested: Same city 3-5 days, different city 5-7 days, different state 7-10 days
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">Admin notes</Label>
+                  <Textarea
+                    value={returnNotes}
+                    onChange={(e) => setReturnNotes(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+                {actionError && (
+                  <p className="text-sm text-destructive">{actionError}</p>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleApproveReturn}
+                    disabled={returnSubmitting}
+                  >
+                    {returnSubmitting ? "Processing..." : "Confirm Return"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setShowReturnForm(false)
+                      setReturnNotes("")
+                      setReturnDeadlineDays(7)
+                      setActionError(null)
+                    }}
+                    disabled={returnSubmitting}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -632,7 +987,17 @@ function EvidenceCard({
       <div className="p-2 space-y-1">
         <div className="flex items-center justify-between">
           <StatusBadge status={evidence.evidence_type} />
+          {evidence.phase && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
+              {evidence.phase}
+            </span>
+          )}
         </div>
+        {evidence.category && (
+          <p className="text-[10px] text-muted-foreground">
+            Category: {evidence.category}
+          </p>
+        )}
         {evidence.notes && (
           <p className="text-xs text-muted-foreground">{evidence.notes}</p>
         )}
