@@ -53,10 +53,14 @@ export function useEvidence(transactionId: string | undefined) {
       imageUri,
       evidenceType,
       notes,
+      phase,
+      category,
     }: {
       imageUri: string;
       evidenceType: EvidenceType;
       notes?: string;
+      phase?: string;
+      category?: string;
     }): Promise<{ ok: true } | { ok: false; error: string }> => {
       if (!userId || !transactionId) {
         return { ok: false, error: "Not authenticated or no transaction" };
@@ -107,6 +111,8 @@ export function useEvidence(transactionId: string | undefined) {
           image_url: storagePath,
           notes: notes ?? null,
           timestamp: new Date().toISOString(),
+          phase: phase ?? "original",
+          category: category ?? "other",
         });
 
         if (insertError) {
