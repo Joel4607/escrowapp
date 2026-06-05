@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/auth-context";
 import { useUserProfile } from "@/features/user/use-user-profile";
 import { useTransaction } from "@/features/transactions/use-transaction";
+import { useReturnTransaction } from "@/features/returns/use-return-transaction";
 import { useEvidence } from "@/features/evidence/use-evidence";
 import type { EvidenceType } from "@/features/evidence/use-evidence";
 import { EvidenceUploadButton } from "@/features/evidence/components/evidence-upload-button";
@@ -847,6 +848,112 @@ function CompletedPanel({ transaction }: { transaction: Transaction }) {
   );
 }
 
+function ReturnApprovedPanel({ transaction }: { transaction: Transaction }) {
+  const router = useRouter();
+  const { session } = useAuth();
+  const isBuyer = transaction.buyer_id === session?.user?.id;
+
+  return (
+    <View className="gap-3">
+      {isBuyer ? (
+        <>
+          <Text className="text-muted-foreground text-sm text-center">
+            Admin has approved a return. Package the item and ship it back to the seller.
+          </Text>
+          <Button
+            onPress={() =>
+              router.push({ pathname: "/transaction/return-shipment", params: { id: transaction.id } })
+            }
+          >
+            <Text className="text-primary-foreground font-semibold">
+              Start Return Process
+            </Text>
+          </Button>
+        </>
+      ) : (
+        <Text className="text-muted-foreground text-sm text-center">
+          A return has been approved. Waiting for the buyer to ship the item back.
+        </Text>
+      )}
+    </View>
+  );
+}
+
+function ReturnInProgressPanel({ transaction }: { transaction: Transaction }) {
+  const { session } = useAuth();
+  const isBuyer = transaction.buyer_id === session?.user?.id;
+
+  return (
+    <Text className="text-muted-foreground text-sm text-center">
+      {isBuyer
+        ? "Item shipped. Waiting for the seller to confirm receipt."
+        : "The buyer has shipped the return. You will need to enter the return delivery token when you receive it."}
+    </Text>
+  );
+}
+
+function ReturnDeliveredPanel({ transaction }: { transaction: Transaction }) {
+  const router = useRouter();
+  const { session } = useAuth();
+  const isBuyer = transaction.buyer_id === session?.user?.id;
+
+  return (
+    <View className="gap-3">
+      {isBuyer ? (
+        <Text className="text-muted-foreground text-sm text-center">
+          Seller has received the return. Waiting for inspection.
+        </Text>
+      ) : (
+        <>
+          <Text className="text-muted-foreground text-sm text-center">
+            Inspect the returned item and approve or raise a counter-dispute.
+          </Text>
+          <Button
+            onPress={() =>
+              router.push({ pathname: "/transaction/return-inspection", params: { id: transaction.id } })
+            }
+          >
+            <Text className="text-primary-foreground font-semibold">
+              Inspect Return
+            </Text>
+          </Button>
+        </>
+      )}
+    </View>
+  );
+}
+
+function ReturnInspectionPanel({ transaction }: { transaction: Transaction }) {
+  const router = useRouter();
+  const { session } = useAuth();
+  const isBuyer = transaction.buyer_id === session?.user?.id;
+
+  return (
+    <View className="gap-3">
+      {isBuyer ? (
+        <Text className="text-muted-foreground text-sm text-center">
+          Seller is inspecting the returned item. You will be notified of the outcome.
+        </Text>
+      ) : (
+        <>
+          <Text className="text-muted-foreground text-sm text-center">
+            Complete your inspection and make a decision.
+          </Text>
+          <Button
+            onPress={() =>
+              router.push({ pathname: "/transaction/return-inspection", params: { id: transaction.id } })
+            }
+          >
+            <Text className="text-primary-foreground font-semibold">
+              Continue Inspection
+            </Text>
+          </Button>
+        </>
+      )}
+    </View>
+  );
+}
+
 function ActionPanel({
   transaction,
   onRefetch,
@@ -922,6 +1029,18 @@ function ActionPanel({
     case "cancelled":
     case "expired":
       return <CompletedPanel transaction={transaction} />;
+
+    case "return_approved":
+      return <ReturnApprovedPanel transaction={transaction} />;
+
+    case "return_in_progress":
+      return <ReturnInProgressPanel transaction={transaction} />;
+
+    case "return_delivered":
+      return <ReturnDeliveredPanel transaction={transaction} />;
+
+    case "return_inspection":
+      return <ReturnInspectionPanel transaction={transaction} />;
 
     default:
       return null;
