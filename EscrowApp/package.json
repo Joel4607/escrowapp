@@ -9,7 +9,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "gen:types": "npx supabase gen types typescript --project-id ktyvdgwdnhgilstuvdtl > lib/database.types.ts"
+    "gen:types": "node ./scripts/gen-types.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
