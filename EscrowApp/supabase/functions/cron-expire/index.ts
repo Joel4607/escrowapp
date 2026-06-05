@@ -43,8 +43,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const { data: returnData, error: returnError } = await supabase.rpc("expire_overdue_returns");
+
+    if (returnError) {
+      return new Response(
+        JSON.stringify({ error: returnError.message }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     return new Response(
-      JSON.stringify({ ok: true, result: data }),
+      JSON.stringify({ ok: true, transactions: data, returns: returnData }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
