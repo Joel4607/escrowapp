@@ -11,6 +11,7 @@ import { useEvidence } from "@/features/evidence/use-evidence";
 import type { EvidenceType } from "@/features/evidence/use-evidence";
 import { EvidenceUploadButton } from "@/features/evidence/components/evidence-upload-button";
 import { EvidenceGallery } from "@/features/evidence/components/evidence-gallery";
+import { EvidenceFeed } from "@/features/evidence/components/evidence-feed";
 import {
   canArchiveTransactionForUser,
   canDeleteTransactionForUser,
@@ -1339,6 +1340,13 @@ export default function TransactionDetailScreen() {
           onDeleteEvidence={deleteEvidence}
           currentUserId={session?.user?.id}
         />
+
+        {/* Evidence timeline */}
+        {evidence.length > 0 && (
+          <SectionCard title="Evidence Timeline">
+            <EvidenceFeed evidence={evidence} />
+          </SectionCard>
+        )}
 
         {/* Action panel */}
         <SectionCard title="Actions">
