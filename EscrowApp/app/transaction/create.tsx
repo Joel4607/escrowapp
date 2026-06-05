@@ -51,6 +51,7 @@ const schema = z.object({
       message: "Price must be greater than 0",
     }),
   seller_contact: z.string().min(1, "Seller contact is required"),
+  buyer_location: z.string().min(1, "Your location is required").max(100),
   delivery_days: z.number().min(1),
   inspection_period: z.number().min(1).max(14),
 });
@@ -76,6 +77,7 @@ export default function CreateTransactionScreen() {
       item_name: "",
       item_description: "",
       seller_contact: "",
+      buyer_location: "",
       delivery_days: 7,
       inspection_period: 2,
     },
@@ -99,6 +101,7 @@ export default function CreateTransactionScreen() {
           item_condition: data.item_condition ?? null,
           price: parseFloat(data.price),
           seller_contact: data.seller_contact,
+          buyer_location: data.buyer_location,
           delivery_deadline: daysFromNow(data.delivery_days),
           inspection_period: data.inspection_period * 24, // convert days → hours for DB
           status: "created",
@@ -287,6 +290,29 @@ export default function CreateTransactionScreen() {
           {errors.seller_contact && (
             <Text className="text-destructive text-xs">
               {errors.seller_contact.message}
+            </Text>
+          )}
+        </View>
+
+        {/* Buyer Location */}
+        <View className="gap-2">
+          <Label nativeID="location-label">Your Location (City/Area) *</Label>
+          <Controller
+            control={control}
+            name="buyer_location"
+            render={({ field: { onChange, value } }) => (
+              <Input
+                aria-labelledby="location-label"
+                className="h-14 rounded-xl"
+                placeholder="e.g. Lagos, Ikeja"
+                value={value}
+                onChangeText={onChange}
+              />
+            )}
+          />
+          {errors.buyer_location && (
+            <Text className="text-destructive text-xs">
+              {errors.buyer_location.message}
             </Text>
           )}
         </View>

@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { ScreenLoader, ScreenError } from "@/components/screen-state";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -391,6 +392,8 @@ function SellerRespondPanel({
 }) {
   const { session } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [sellerLocation, setSellerLocation] = useState("");
+  const [returnConditions, setReturnConditions] = useState("");
 
   const handleAccept = async () => {
     if (!session?.user) return;
@@ -398,6 +401,8 @@ function SellerRespondPanel({
     try {
       const { error } = await supabase.rpc("accept_transaction", {
         p_transaction_id: transaction.id,
+        p_seller_location: sellerLocation.trim() || undefined,
+        p_return_conditions: returnConditions.trim() || undefined,
       });
       if (error) Alert.alert("Error", error.message);
       else onRefetch();
@@ -440,6 +445,26 @@ function SellerRespondPanel({
       <Text className="text-muted-foreground text-sm text-center">
         Review the transaction details above, then accept or reject.
       </Text>
+      <View className="gap-2">
+        <Text className="text-foreground text-sm font-medium">Your Location (City/Area)</Text>
+        <Input
+          className="h-12 rounded-xl"
+          placeholder="e.g. Lagos, Lekki"
+          value={sellerLocation}
+          onChangeText={setSellerLocation}
+        />
+      </View>
+      <View className="gap-2">
+        <Text className="text-foreground text-sm font-medium">Return Conditions (Optional)</Text>
+        <Input
+          className="h-20 rounded-xl"
+          placeholder="e.g. Must include original box, charger, and accessories"
+          multiline
+          textAlignVertical="top"
+          value={returnConditions}
+          onChangeText={setReturnConditions}
+        />
+      </View>
       <Button onPress={handleAccept} disabled={loading}>
         <Text className="text-primary-foreground font-semibold">
           {loading ? "Processing..." : "Accept Transaction"}
