@@ -370,6 +370,365 @@ function WebEvidenceSection({
   );
 }
 
+function WebReturnSection({
+  inviteId,
+  inviteToken,
+  status,
+}: {
+  inviteId: string;
+  inviteToken: string;
+  status: string;
+}) {
+  const [returnData, setReturnData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [tokenInput, setTokenInput] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [showCounterDispute, setShowCounterDispute] = useState(false);
+  const [counterReason, setCounterReason] = useState("");
+  const [counterDescription, setCounterDescription] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const COUNTER_DISPUTE_REASONS = [
+    "Product returned damaged",
+    "Parts removed or swapped",
+    "Accessories missing",
+    "Product condition differs from return photos",
+    "Wrong item returned",
+    "Other",
+  ];
+
+  const fetchReturnDetails = useCallback(async () => {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invite_id: inviteId, token: inviteToken, action: "get_return_details" }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setReturnData(data);
+      }
+    } catch {
+      // silently fail
+    }
+  }, [inviteId, inviteToken]);
+
+  useEffect(() => {
+    if (["return_approved", "return_in_progress", "return_delivered", "return_inspection"].includes(status)) {
+      fetchReturnDetails();
+      const interval = setInterval(fetchReturnDetails, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [status, fetchReturnDetails]);
+
+  const handleConfirmReceipt = async () => {
+    if (!tokenInput.trim()) return;
+    setConfirming(true);
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invite_id: inviteId,
+          token: inviteToken,
+          action: "confirm_return_receipt",
+          return_token: tokenInput.trim(),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        Alert.alert("Error", data.error || "Failed to confirm receipt");
+      } else {
+        setTokenInput("");
+        await fetchReturnDetails();
+      }
+    } catch {
+      Alert.alert("Error", "Network error");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const handleUploadEvidence = async () => {
+    if (Platform.OS === "web") {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.onchange = async (e: any) => {
+        const file = e.target?.files?.[0];
+        if (!file) return;
+        setUploading(true);
+        try {
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => {
+              const result = reader.result as string;
+              resolve(result.split(",")[1]);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              invite_id: inviteId,
+              token: inviteToken,
+              action: "upload_return_evidence",
+              image_base64: base64,
+              evidence_type: "received_item",
+              phase: "return_receipt",
+              category: "other",
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            Alert.alert("Upload Failed", data.error || "Failed");
+          } else {
+            await fetchReturnDetails();
+          }
+        } catch {
+          Alert.alert("Upload Failed", "Network error");
+        } finally {
+          setUploading(false);
+        }
+      };
+      input.click();
+    }
+  };
+
+  const handleApproveReturn = async () => {
+    Alert.alert("Approve Return", "Confirm that the returned item is acceptable? The buyer will be refunded.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Approve & Refund",
+        onPress: async () => {
+          setProcessing(true);
+          try {
+            const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                invite_id: inviteId,
+                token: inviteToken,
+                action: "approve_return",
+              }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+              Alert.alert("Error", data.error || "Failed");
+            } else {
+              await fetchReturnDetails();
+            }
+          } catch {
+            Alert.alert("Error", "Network error");
+          } finally {
+            setProcessing(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleCounterDispute = async () => {
+    if (!counterReason) return;
+    setProcessing(true);
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invite_id: inviteId,
+          token: inviteToken,
+          action: "raise_counter_dispute",
+          counter_reason: counterReason,
+          counter_description: counterDescription.trim() || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        Alert.alert("Error", data.error || "Failed");
+      } else {
+        setShowCounterDispute(false);
+        setCounterReason("");
+        setCounterDescription("");
+        await fetchReturnDetails();
+      }
+    } catch {
+      Alert.alert("Error", "Network error");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Don't show if not in a return state
+  if (!["return_approved", "return_in_progress", "return_delivered", "return_inspection"].includes(status)) {
+    return null;
+  }
+
+  const rt = returnData?.return_transaction;
+  const cd = returnData?.counter_dispute;
+  const evidence = returnData?.evidence ?? [];
+
+  return (
+    <Card className="p-4 gap-4">
+      <Text className="text-foreground font-semibold">Return Transaction</Text>
+
+      {/* Waiting for buyer to ship */}
+      {status === "return_approved" && (
+        <View className="bg-secondary/50 rounded-xl p-3">
+          <Text className="text-muted-foreground text-sm text-center">
+            Waiting for the buyer to ship the item back to you.
+          </Text>
+          {rt?.return_deadline && (
+            <Text className="text-muted-foreground text-xs text-center mt-1">
+              Deadline: {new Date(rt.return_deadline).toLocaleDateString()}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {/* Buyer shipped — enter token */}
+      {status === "return_in_progress" && (
+        <View className="gap-3">
+          <Text className="text-muted-foreground text-sm">
+            The buyer has shipped the return. Enter the return delivery token to confirm receipt.
+          </Text>
+          <Input
+            className="h-14 rounded-xl text-center"
+            placeholder="ENTER RETURN TOKEN"
+            autoCapitalize="characters"
+            value={tokenInput}
+            onChangeText={setTokenInput}
+          />
+          <Button onPress={handleConfirmReceipt} disabled={confirming || !tokenInput.trim()}>
+            <Text className="text-primary-foreground font-semibold">
+              {confirming ? "Confirming..." : "Confirm Receipt"}
+            </Text>
+          </Button>
+        </View>
+      )}
+
+      {/* Return delivered — inspection */}
+      {(status === "return_delivered" || status === "return_inspection") && !cd && (
+        <View className="gap-3">
+          {rt?.inspection_deadline && (
+            <View className="bg-secondary/50 rounded-xl p-3">
+              <Text className="text-muted-foreground text-xs">
+                Inspection deadline: {new Date(rt.inspection_deadline).toLocaleString()}
+              </Text>
+              <Text className="text-muted-foreground text-xs mt-1">
+                If you don't act before the deadline, the return will be auto-approved and the buyer refunded.
+              </Text>
+            </View>
+          )}
+
+          {rt?.seller_return_conditions && (
+            <View className="bg-secondary/50 rounded-xl p-3">
+              <Text className="text-muted-foreground text-xs font-semibold">Your Return Conditions</Text>
+              <Text className="text-muted-foreground text-xs mt-1">{rt.seller_return_conditions}</Text>
+            </View>
+          )}
+
+          {/* Evidence thumbnails */}
+          {evidence.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {evidence.map((item: any) => (
+                <View key={item.id} className="gap-1">
+                  {item.signed_url ? (
+                    <Image
+                      source={{ uri: item.signed_url }}
+                      style={{ height: 60, width: 60, borderRadius: 8 }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={{ height: 60, width: 60, borderRadius: 8 }} className="bg-secondary" />
+                  )}
+                  <Text className="text-muted-foreground text-center" style={{ fontSize: 8 }}>
+                    {item.user_role === "buyer" ? "Buyer" : "Seller"}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+
+          <Button variant="outline" onPress={handleUploadEvidence} disabled={uploading}>
+            <Text className="text-foreground font-medium">
+              {uploading ? "Uploading..." : "Upload Inspection Photo"}
+            </Text>
+          </Button>
+
+          {!showCounterDispute && (
+            <View className="gap-2">
+              <Button onPress={handleApproveReturn} disabled={processing}>
+                <Text className="text-primary-foreground font-semibold">
+                  {processing ? "Processing..." : "Approve Return"}
+                </Text>
+              </Button>
+              <Button variant="outline" onPress={() => setShowCounterDispute(true)} disabled={processing}>
+                <Text className="text-destructive font-semibold">Raise Counter-Dispute</Text>
+              </Button>
+            </View>
+          )}
+
+          {showCounterDispute && (
+            <View className="gap-3">
+              <Text className="text-foreground font-semibold">Counter-Dispute</Text>
+              {COUNTER_DISPUTE_REASONS.map((r) => (
+                <Pressable
+                  key={r}
+                  onPress={() => setCounterReason(r)}
+                  className={`rounded-xl border px-4 py-3 ${
+                    counterReason === r ? "bg-destructive/10 border-destructive" : "bg-secondary border-border"
+                  }`}
+                >
+                  <Text className="text-foreground text-sm">{r}</Text>
+                </Pressable>
+              ))}
+              <Input
+                className="h-20 rounded-xl"
+                placeholder="Describe the issue..."
+                multiline
+                textAlignVertical="top"
+                value={counterDescription}
+                onChangeText={setCounterDescription}
+              />
+              <View className="flex-row gap-3">
+                <Button variant="outline" className="flex-1" onPress={() => setShowCounterDispute(false)}>
+                  <Text className="text-foreground font-medium">Cancel</Text>
+                </Button>
+                <Button
+                  className="flex-1 bg-destructive"
+                  onPress={handleCounterDispute}
+                  disabled={processing || !counterReason}
+                >
+                  <Text className="text-destructive-foreground font-semibold">
+                    {processing ? "Submitting..." : "Submit"}
+                  </Text>
+                </Button>
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Counter-disputed */}
+      {cd && cd.status !== "resolved" && (
+        <View className="bg-destructive/10 rounded-xl p-4 gap-2">
+          <Text className="text-destructive font-semibold">Counter-Dispute Filed</Text>
+          <Text className="text-foreground text-sm">Reason: {cd.reason}</Text>
+          {cd.description && <Text className="text-muted-foreground text-sm">{cd.description}</Text>}
+          <Text className="text-muted-foreground text-xs">
+            An admin will review all evidence and make a decision.
+          </Text>
+        </View>
+      )}
+    </Card>
+  );
+}
+
 export default function InviteScreen() {
   const { id, token } = useLocalSearchParams<{ id: string; token: string }>();
 
@@ -755,6 +1114,15 @@ export default function InviteScreen() {
             {/* Evidence photos */}
             {id && token && (
               <WebEvidenceSection
+                inviteId={id}
+                inviteToken={token}
+                status={status}
+              />
+            )}
+
+            {/* Return transaction */}
+            {id && token && (
+              <WebReturnSection
                 inviteId={id}
                 inviteToken={token}
                 status={status}
