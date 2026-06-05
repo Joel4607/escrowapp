@@ -20,6 +20,10 @@ export type TransactionStatus =
   | "cancelled"
   | "expired"
   | "admin_review"
+  | "return_approved"
+  | "return_in_progress"
+  | "return_delivered"
+  | "return_inspection"
 
 export type DisputeStatus =
   | "open"
@@ -111,6 +115,9 @@ export type Transaction = {
   delivery_deadline: string
   inspection_period: number
   status: TransactionStatus
+  buyer_location: string | null
+  seller_location: string | null
+  seller_return_conditions: string | null
   funded_at: string | null
   accepted_at: string | null
   delivered_at: string | null
@@ -152,6 +159,8 @@ export type Evidence = {
   timestamp: string
   location: string | null
   metadata: Record<string, unknown> | null
+  phase: string | null
+  category: string | null
   created_at: string
   // Runtime
   signedUrl?: string | null
@@ -200,6 +209,41 @@ export type DeliveryToken = {
   used_at: string | null
   expires_at: string
   created_at: string
+}
+
+export type ReturnTransaction = {
+  id: string
+  original_transaction_id: string
+  dispute_id: string
+  return_deadline: string
+  buyer_location: string | null
+  seller_location: string | null
+  seller_return_conditions: string | null
+  status: string
+  shipped_at: string | null
+  delivered_at: string | null
+  inspection_deadline: string | null
+  resolved_at: string | null
+  resolution: string | null
+  created_at: string
+  created_by: string | null
+  admin_notes: string | null
+}
+
+export type CounterDispute = {
+  id: string
+  return_transaction_id: string
+  original_dispute_id: string
+  opened_by: string
+  reason: string
+  description: string | null
+  status: string
+  admin_decision: string | null
+  admin_notes: string | null
+  resolution_type: string | null
+  refund_amount: number
+  created_at: string
+  resolved_at: string | null
 }
 
 // ============================================
