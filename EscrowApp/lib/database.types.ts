@@ -1232,5 +1232,15 @@ export const Constants = {
     },
   },
 } as const
-A new version of Supabase CLI is available: v2.105.0 (currently installed v2.101.0)
-We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+
+export type TransactionStatus = Database["public"]["Enums"]["transaction_status"];
+export type UserRole = Database["public"]["Enums"]["user_role"];
+export type LedgerType = Database["public"]["Enums"]["ledger_type"];
+export type LedgerStatus = Database["public"]["Enums"]["ledger_status"];
+export type DisputeStatus = Database["public"]["Enums"]["dispute_status"];
+export type ResolutionType = Database["public"]["Enums"]["resolution_type"];
+export type FraudRiskLevel = Database["public"]["Enums"]["fraud_risk_level"];
+export type FraudFlagStatus = Database["public"]["Enums"]["fraud_flag_status"];
+export type InviteStatus = Database["public"]["Enums"]["invite_status"];
+export type OtpPurpose = Database["public"]["Enums"]["otp_purpose"];
+export type ReturnStatus = Database["public"]["Enums"]["return_status"];
