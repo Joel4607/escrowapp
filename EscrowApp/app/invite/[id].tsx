@@ -1239,18 +1239,18 @@ export default function InviteScreen() {
                 <Text className="text-muted-foreground text-sm">
                   Loading transaction details...
                 </Text>
-                {statusError && (
+                {statusError ? (
                   <Text className="text-destructive text-xs text-center px-6">
                     {statusError}
                   </Text>
-                )}
+                ) : null}
               </View>
             )}
 
             {/* Auto-refresh notice */}
             {tx && !isReleased && !isDisputed && (
               <Text className="text-muted-foreground text-xs text-center">
-                This page refreshes automatically every 10 seconds.
+                This page refreshes automatically every 5 seconds.
               </Text>
             )}
 
