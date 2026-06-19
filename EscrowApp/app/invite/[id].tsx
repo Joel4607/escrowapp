@@ -9,6 +9,17 @@ import { ActivityIndicator, Alert, Image, Pressable, ScrollView, View, Platform 
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+
+// Edge functions sit behind the Supabase gateway, which requires an apikey even
+// for functions that do their own per-invite-token auth. Always send the public
+// anon key so the gateway never rejects the request with a 401 before the
+// function runs.
+const FUNCTION_HEADERS = {
+  "Content-Type": "application/json",
+  apikey: SUPABASE_ANON_KEY,
+  Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+};
 
 type InviteState = "loading" | "preview" | "email_entry" | "otp_sent" | "verified" | "accepted" | "rejected" | "tracking" | "error";
 
@@ -162,7 +173,7 @@ function WebEvidenceSection({
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({ invite_id: inviteId, token: inviteToken, action: "get_evidence" }),
       });
       const data = await response.json();
@@ -204,7 +215,7 @@ function WebEvidenceSection({
 
           const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: FUNCTION_HEADERS,
             body: JSON.stringify({
               invite_id: inviteId,
               token: inviteToken,
@@ -240,7 +251,7 @@ function WebEvidenceSection({
           try {
             const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: FUNCTION_HEADERS,
               body: JSON.stringify({
                 invite_id: inviteId,
                 token: inviteToken,
@@ -402,7 +413,7 @@ function WebReturnSection({
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({ invite_id: inviteId, token: inviteToken, action: "get_return_details" }),
       });
       const data = await response.json();
@@ -428,7 +439,7 @@ function WebReturnSection({
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({
           invite_id: inviteId,
           token: inviteToken,
@@ -472,7 +483,7 @@ function WebReturnSection({
 
           const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: FUNCTION_HEADERS,
             body: JSON.stringify({
               invite_id: inviteId,
               token: inviteToken,
@@ -509,7 +520,7 @@ function WebReturnSection({
           try {
             const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: FUNCTION_HEADERS,
               body: JSON.stringify({
                 invite_id: inviteId,
                 token: inviteToken,
@@ -538,7 +549,7 @@ function WebReturnSection({
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({
           invite_id: inviteId,
           token: inviteToken,
@@ -738,6 +749,7 @@ export default function InviteScreen() {
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -753,7 +765,7 @@ export default function InviteScreen() {
       try {
         const response = await fetch(`${SUPABASE_URL}/functions/v1/verify-invite`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: FUNCTION_HEADERS,
           body: JSON.stringify({ invite_id: id, token }),
         });
 
@@ -790,16 +802,19 @@ export default function InviteScreen() {
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({ invite_id: id, token, action: "get_status" }),
       });
 
       const data = await response.json();
       if (response.ok && data.transaction) {
         setTransaction(data.transaction);
+        setStatusError(null);
+      } else if (!response.ok) {
+        setStatusError(data.error || "Couldn't load the transaction. Retrying...");
       }
     } catch {
-      // Silently fail on poll
+      setStatusError("Network error. Retrying...");
     }
   }, [id, token]);
 
@@ -836,7 +851,7 @@ export default function InviteScreen() {
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/send-otp`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({ invite_id: id, email: email.trim(), token }),
       });
 
@@ -864,7 +879,7 @@ export default function InviteScreen() {
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/verify-otp`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({ invite_id: id, token, otp: otp.trim() }),
       });
 
@@ -903,7 +918,7 @@ export default function InviteScreen() {
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/accept-invite`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({ invite_id: id, token }),
       });
 
@@ -930,7 +945,7 @@ export default function InviteScreen() {
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/reject-invite`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({ invite_id: id, token }),
       });
 
@@ -957,7 +972,7 @@ export default function InviteScreen() {
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/seller-web-action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: FUNCTION_HEADERS,
         body: JSON.stringify({ invite_id: id, token, action }),
       });
 
@@ -1224,6 +1239,11 @@ export default function InviteScreen() {
                 <Text className="text-muted-foreground text-sm">
                   Loading transaction details...
                 </Text>
+                {statusError && (
+                  <Text className="text-destructive text-xs text-center px-6">
+                    {statusError}
+                  </Text>
+                )}
               </View>
             )}
 
