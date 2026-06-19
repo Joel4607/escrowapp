@@ -1,0 +1,31 @@
+project_id = "ktyvdgwdnhgilstuvdtl"
+
+# Public invite-flow edge functions. These are called from the web invite page
+# (and the mobile app) without a Supabase user session — they do their own auth
+# via the per-invite token, so JWT verification at the gateway must be disabled.
+# A missing entry here causes the gateway to reject calls with
+# "401 UNAUTHORIZED_NO_AUTH_HEADER" before the function runs.
+
+[functions.verify-invite]
+verify_jwt = false
+
+[functions.send-otp]
+verify_jwt = false
+
+[functions.verify-otp]
+verify_jwt = false
+
+[functions.accept-invite]
+verify_jwt = false
+
+[functions.reject-invite]
+verify_jwt = false
+
+[functions.create-invite]
+verify_jwt = false
+
+[functions.send-release-email]
+verify_jwt = false
+
+[functions.seller-web-action]
+verify_jwt = false
